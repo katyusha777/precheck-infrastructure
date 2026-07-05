@@ -1,0 +1,123 @@
+# PreCheck — PRODUCTION compose (Hetzner). Uses the published image; for a
+# local build use docker-compose.dev.yml instead.
+#
+#   cp deploy/docker/.env.production.example .env   # then fill it in
+#   docker compose pull && docker compose up -d
+#
+# Topology: Caddy terminates TLS (automatic Let's Encrypt for $PRECHECK_DOMAIN)
+# and password-protects the test frontend; /api/* passes through to the app's
+# Bearer-token auth. Postgres + Redis are internal-only. Nightly pg_dump
+# backups land in the `precheck-backups` volume (rotate 14 days).
+
+services:
+  app:
+    image: shaunders/precheck-api:${PRECHECK_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    stop_grace_period: 45s # let in-flight report steps drain on deploys
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8749
+      DATABASE_URL: postgresql://precheck:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/precheck
+      REDIS_URL: redis://redis:6379
+      PRECHECK_ACCESS_TOKEN: ${PRECHECK_ACCESS_TOKEN:?set PRECHECK_ACCESS_TOKEN (min 24 chars)}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      TRUST_PROXY: "1" # Caddy fronts the app; rate limiting needs real client IPs
+      PRECHECK_PIPELINE_CONCURRENCY: ${PRECHECK_PIPELINE_CONCURRENCY:-8}
+      ANTHROPIC_CONCURRENCY: ${ANTHROPIC_CONCURRENCY:-8}
+      PRECHECK_JOB_RETENTION_DAYS: ${PRECHECK_JOB_RETENTION_DAYS:-0}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PRECHECK_DOMAIN: ${PRECHECK_DOMAIN:?set PRECHECK_DOMAIN (e.g. precheck.example.com)}
+      # htpasswd-style bcrypt hash: `docker run --rm caddy:2-alpine caddy hash-password --plaintext '...'`
+      FRONTEND_BASIC_AUTH_USER: ${FRONTEND_BASIC_AUTH_USER:-precheck}
+      FRONTEND_BASIC_AUTH_HASH: ${FRONTEND_BASIC_AUTH_HASH:?set FRONTEND_BASIC_AUTH_HASH}
+    volumes:
+      - ./deploy/docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - precheck-caddy-data:/data
+      - precheck-caddy-config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: precheck
+      POSTGRES_USER: precheck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - precheck-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U precheck -d precheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - precheck-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - precheck-backups:/backups
+    # Nightly compressed dump, 14-day rotation. Copy /backups off-box (e.g.
+    # Hetzner Storage Box) for real disaster recovery — see the README.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        while true; do
+          pg_dump -h postgres -U precheck -d precheck | gzip > "/backups/precheck-$(date +%F).sql.gz" \
+            && find /backups -name 'precheck-*.sql.gz' -mtime +14 -delete \
+            && echo "backup ok: precheck-$(date +%F).sql.gz"
+          sleep 86400
+        done
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
+
+volumes:
+  precheck-postgres:
+  precheck-redis:
+  precheck-backups:
+  precheck-caddy-data:
+  precheck-caddy-config:
