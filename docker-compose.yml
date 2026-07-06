@@ -33,7 +33,7 @@ services:
 
   api:
     image: shaunders/precheck-api:latest
-    stop_grace_period: 5s # let in-flight report steps drain on deploys
+    stop_grace_period: 45s # let in-flight report steps drain on deploys (a single LLM step can run for ~30s)
     ports:
       - "8888:8749"
     env_file:
