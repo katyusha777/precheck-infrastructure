@@ -2,7 +2,7 @@ services:
 
   api:
     image: shaunders/precheck-api:staging
-    stop_grace_period: 5s # let in-flight report steps drain on deploys
+    stop_grace_period: 16m # 15-minute report deadline plus shutdown margin
     ports:
       - "8889:8749"
     env_file:
@@ -13,15 +13,17 @@ services:
       NODE_ENV: production
       APP_HOST: 0.0.0.0
       APP_PORT: 8749
-      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
+      PRECHECK_JOB_MAX_MINUTES: ${PRECHECK_JOB_MAX_MINUTES:-15}
       PRECHECK_ACCESS_TOKEN: ${PRECHECK_ACCESS_TOKEN:?set PRECHECK_ACCESS_TOKEN (min 24 chars)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TERRA_MODEL: ${OPENAI_TERRA_MODEL:-}
+      OPENAI_SOL_MODEL: ${OPENAI_SOL_MODEL:-}
       PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
       TRUST_PROXY: "1" # Caddy fronts the app; rate limiting needs real client IPs
-      PRECHECK_PIPELINE_CONCURRENCY: ${PRECHECK_PIPELINE_CONCURRENCY:-8}
       ANTHROPIC_CONCURRENCY: ${ANTHROPIC_CONCURRENCY:-8}
-      PRECHECK_JOB_RETENTION_DAYS: ${PRECHECK_JOB_RETENTION_DAYS:-0}
+      OPENAI_CONCURRENCY: ${OPENAI_CONCURRENCY:-8}
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
     logging:
       driver: json-file
@@ -32,7 +34,7 @@ services:
         condition: any
         delay: 5s
       update_config:
-        order: start-first # new task must be running before the old one stops
+        order: stop-first
         failure_action: rollback
       rollback_config:
-        order: start-first
+        order: stop-first
