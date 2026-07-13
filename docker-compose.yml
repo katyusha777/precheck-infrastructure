@@ -48,9 +48,9 @@ services:
       # v1.48.1 measurement mode: no whole-job wall-clock cutoff. Provider
       # request timeouts, cancellation, progress, and restart cleanup remain.
       PRECHECK_JOB_MAX_MINUTES: "0"
-      # v1.49.2 paired measurement only. Observe after legacy artifacts are
-      # finalized; this must not affect content, cost, quality, or delivery.
-      PRECHECK_SURFACE_REGISTRY_OBSERVE: "true"
+      # Observer enforcement remains disabled in production. Paired measurements
+      # use an explicit, temporary image build argument and restore it afterward.
+      PRECHECK_SURFACE_REGISTRY_OBSERVE: "false"
       PRECHECK_ACCESS_TOKEN: ${PRECHECK_ACCESS_TOKEN:?set PRECHECK_ACCESS_TOKEN (min 24 chars)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
