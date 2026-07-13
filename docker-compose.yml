@@ -33,7 +33,7 @@ services:
 
   api:
     image: shaunders/precheck-api:latest
-    stop_grace_period: 16m # 15-minute report deadline plus shutdown margin
+    stop_grace_period: 16m # drain window; deploy only while unrestricted reports are idle
     ports:
       - "8888:8749"
     env_file:
@@ -45,7 +45,9 @@ services:
       APP_HOST: 0.0.0.0
       APP_PORT: 8749
       REDIS_URL: ${REDIS_URL}
-      PRECHECK_JOB_MAX_MINUTES: ${PRECHECK_JOB_MAX_MINUTES:-15}
+      # v1.48.1 measurement mode: no whole-job wall-clock cutoff. Provider
+      # request timeouts, cancellation, progress, and restart cleanup remain.
+      PRECHECK_JOB_MAX_MINUTES: "0"
       PRECHECK_ACCESS_TOKEN: ${PRECHECK_ACCESS_TOKEN:?set PRECHECK_ACCESS_TOKEN (min 24 chars)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
